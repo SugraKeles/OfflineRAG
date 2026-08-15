@@ -209,7 +209,7 @@ class RAGAssistantGUI(ctk.CTk):
                 "question": question,
                 "file_path": file_path
             }
-            response = requests.post(API_URL, json=payload, timeout=45)
+            response = requests.post(API_URL, json=payload, timeout=120)
 
             if response.status_code == 200:
                 data = response.json()

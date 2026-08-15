@@ -1,37 +1,40 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI
 import os
 
 app = FastAPI()
 
-# Foundry Local sunucusuna baglaniyoruz (Gorseldeki port: 61424)
+# Foundry Local sunucusuna baglanti
 client = OpenAI(
     base_url="http://127.0.0.1:61424/v1",
     api_key="api-key-gerekmez"
 )
 
-# WPF'den gelecek istegin (JSON) sablonu
 class QuestionRequest(BaseModel):
     question: str
-    file_path: str | None = None
+    file_path: str 
 
 @app.post("/ask")
 def ask_rag(request: QuestionRequest):
-    # 1. RAG icin belge okuma
-    dosya_adi = request.file_path if (request.file_path and os.path.exists(request.file_path)) else "proje_notlari.txt"
-    if not os.path.exists(dosya_adi):
-        with open(dosya_adi, "w", encoding="utf-8") as f:
-            f.write("Offline RAG asistani, internet baglantisi olmadan yerel cihazda calisarak veri gizliligini saglar.\n\n")
-            f.write("Projenin arayuzu WPF teknolojisi ve Antigravity kullanilarak tasarlanmistir.\n\n")
-            f.write("Sistem arka planda FastAPI kullanarak mikroservis mimarisi ile calisir.\n\n")
+    dosya_adi = request.file_path
     
-    with open(dosya_adi, "r", encoding="utf-8") as file:
-        metin = file.read()
+    if not os.path.exists(dosya_adi):
+        raise HTTPException(status_code=404, detail="Secilen dosya bulunamadi.")
+    
+    try:
+        with open(dosya_adi, "r", encoding="utf-8") as file:
+            metin = file.read()
+    except UnicodeDecodeError:
+        try:
+            with open(dosya_adi, "r", encoding="windows-1254") as file:
+                metin = file.read()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Dosya okuma hatasi: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Beklenmeyen dosya hatasi: {str(e)}")
     
     parcalar = metin.split("\n\n")
-    
-    # 2. Basit Baglam Eslestirme
     soru_kelimeleri = set(request.question.lower().split())
     alakali_parcalar = sorted(
         parcalar, 
@@ -40,26 +43,25 @@ def ask_rag(request: QuestionRequest):
     )[:2]
     baglam = "\n".join(alakali_parcalar)
     
-    # 3. Yerel Modele Istek Atma
-    sistem_mesaji = f"""
-    Asagidaki belgelere dayanarak kullanicinin sorusunu kisaca cevapla.
-    Eger bilgi belgelerde yoksa 'Bu bilgiye sahip degilim' de.
+    # KUCUK MODELLER ICIN OPTIMIZE EDILMIS ISTEM
+    kullanici_mesaji = f"""Lutfen sorumu SADECE asagidaki bilgiye gore cevapla. Baska bir bilgi kullanma.
+
+Bilgi: 
+{baglam}
+
+Soru: {request.question}"""
     
-    Belgeler:
-    {baglam}
-    """
-    
-    response = client.chat.completions.create(
-        model="phi-3.5-mini",
-        messages=[
-            {"role": "system", "content": sistem_mesaji},
-            {"role": "user", "content": request.question}
-        ],
-        temperature=0.3
-    )
-    
-    # 4. WPF'in kolayca okuyabilecegi JSON formatinda donuyoruz
-    return {
-        "answer": response.choices[0].message.content,
-        "context_used": baglam
-    }
+    try:
+        response = client.chat.completions.create(
+            model="qwen2.5-1.5b",
+            messages=[
+                {"role": "user", "content": kullanici_mesaji}
+            ],
+            temperature=0.1 
+        )
+        return {
+            "answer": response.choices[0].message.content,
+            "context_used": baglam
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Yapay Zeka API Hatasi: {str(e)}")
