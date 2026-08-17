@@ -1,9 +1,15 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from openai import OpenAI
 import os
 
 app = FastAPI()
+
+# 1. HTML Arayüzünü Tarayýcýya Sunan Endpoint
+@app.get("/")
+def serve_html():
+    return FileResponse("index.html")
 
 # Foundry Local sunucusuna baglanti
 client = OpenAI(
@@ -43,7 +49,6 @@ def ask_rag(request: QuestionRequest):
     )[:2]
     baglam = "\n".join(alakali_parcalar)
     
-    # KUCUK MODELLER ICIN OPTIMIZE EDILMIS ISTEM
     kullanici_mesaji = f"""Lutfen sorumu SADECE asagidaki bilgiye gore cevapla. Baska bir bilgi kullanma.
 
 Bilgi: 
@@ -51,17 +56,23 @@ Bilgi:
 
 Soru: {request.question}"""
     
-    try:
-        response = client.chat.completions.create(
-            model="qwen2.5-1.5b",
-            messages=[
-                {"role": "user", "content": kullanici_mesaji}
-            ],
-            temperature=0.1 
-        )
-        return {
-            "answer": response.choices[0].message.content,
-            "context_used": baglam
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Yapay Zeka API Hatasi: {str(e)}")
+    # 2. Kelime kelime akýþ saðlayan Jeneratör Fonksiyonu
+    def generate_stream():
+        try:
+            stream = client.chat.completions.create(
+                model="qwen2.5-1.5b",
+                messages=[
+                    {"role": "user", "content": kullanici_mesaji}
+                ],
+                temperature=0.1,
+                stream=True  # Akýþý aktif ets
+            )
+            for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    # Gelen her kelimeyi (token) anýnda frontende fýrlat
+                    yield chunk.choices[0].delta.content 
+        except Exception as e:
+            yield f"\n[Yapay Zeka API Hatasi: {str(e)}]"
+
+    # Veriyi text stream olarak dön
+    return StreamingResponse(generate_stream(), media_type="text/plain")
