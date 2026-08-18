@@ -6,7 +6,7 @@ import os
 
 app = FastAPI()
 
-# 1. HTML Arayüzünü Tarayýcýya Sunan Endpoint
+# --- ISTE EKSIK OLAN VE HTML'I TARAYICIYA GONDEREN KISIM ---
 @app.get("/")
 def serve_html():
     return FileResponse("index.html")
@@ -56,7 +56,6 @@ Bilgi:
 
 Soru: {request.question}"""
     
-    # 2. Kelime kelime akýþ saðlayan Jeneratör Fonksiyonu
     def generate_stream():
         try:
             stream = client.chat.completions.create(
@@ -65,14 +64,13 @@ Soru: {request.question}"""
                     {"role": "user", "content": kullanici_mesaji}
                 ],
                 temperature=0.1,
-                stream=True  # Akýþý aktif ets
+                stream=True
             )
             for chunk in stream:
-                if chunk.choices[0].delta.content is not None:
-                    # Gelen her kelimeyi (token) anýnda frontende fýrlat
+                # Kapanis paketi gelmediginden (listenin bos olmadigindan) emin oluyoruz
+                if len(chunk.choices) > 0 and chunk.choices[0].delta.content is not None:
                     yield chunk.choices[0].delta.content 
         except Exception as e:
             yield f"\n[Yapay Zeka API Hatasi: {str(e)}]"
 
-    # Veriyi text stream olarak dön
     return StreamingResponse(generate_stream(), media_type="text/plain")
