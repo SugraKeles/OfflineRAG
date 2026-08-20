@@ -470,7 +470,11 @@
     </main>
   </div>
 
+
   <script>
+    /* --- YENI: Dinamik Degiskenimiz --- */
+    let activeDocument = null; // Aktif olarak islem goren dosyanin adi
+
     /* ─── Helpers ─── */
     function now() {
       return new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
@@ -482,6 +486,12 @@
       const input  = document.getElementById('msg-input');
       const text   = input.value.trim();
       if (!text) return;
+
+      // Eger kullanici hic dosya yuklemeden soru sorarsa uyaralim
+      if (!activeDocument) {
+        appendErrorMessage("Lütfen önce sol panelden belge yükleyin.");
+        return;
+      }
 
       input.value = '';
       appendUserMessage(text);
@@ -519,7 +529,6 @@
       const sendBtn = document.getElementById('send-btn');
       sendBtn.disabled = true;
 
-      // 1. Asistan için animasyonlu (Düşünüyor) balonu oluştur
       const typingCard = document.createElement('div');
       typingCard.className = 'msg-card bot-msg';
       typingCard.innerHTML = `
@@ -539,17 +548,15 @@
       chat.appendChild(typingCard);
       scrollToBottom();
 
-      // Arayüzdeki elemanları yakala
       const typingDots = typingCard.querySelector('#typing-dots');
       const responseText = typingCard.querySelector('#bot-response-text');
 
-      // 2. FastAPI (main.py) Sunucusuna İsteği Gönder
       try {
-        const TEST_FILE_PATH = "test.txt"; // TODO: Daha sonra arayüzden gelen dinamik dosyaya bağlanacak
+        // ARTIK activeDocument DEGISKENINI GONDERIYORUZ
         const response = await fetch("/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: question, file_path: TEST_FILE_PATH })
+          body: JSON.stringify({ question: question, file_path: activeDocument })
         });
 
         if (!response.ok) throw new Error("Sunucu yanıt vermedi. (main.py çalışıyor mu?)");
@@ -558,12 +565,10 @@
         const decoder = new TextDecoder("utf-8");
         let isFirstChunk = true;
 
-        // 3. Akışı (Stream) Harf Harf Dinle ve Ekrana Yaz
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          // İlk kelime geldiğinde yükleniyor animasyonunu gizle, yazıyı göster
           if (isFirstChunk) {
             typingDots.style.display = "none";
             responseText.style.display = "block";
@@ -571,8 +576,6 @@
           }
 
           const textChunk = decoder.decode(value, { stream: true });
-          
-          // Metni ekrana ekle (satır atlamalarını HTML <br> etiketine çevir)
           responseText.innerHTML += escapeHtml(textChunk).replace(/\n/g, "<br>");
           scrollToBottom();
         }
@@ -631,7 +634,7 @@
       requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
     }
 
-    /* ─── File upload ─── */
+    /* ─── File upload (YENILENDI) ─── */
     function handleDragOver(e) {
       e.preventDefault();
       document.getElementById('drop-zone').classList.add('drag-over');
@@ -651,23 +654,43 @@
       e.target.value = '';
     }
 
-    function processFiles(files) {
-      const allowed = ['.txt', '.pdf', '.md'];
-      files.forEach(file => {
+    // --- YENI: DOSYAYI SUNUCUYA (PYTHON) GONDEREN KISIM ---
+    async function processFiles(files) {
+      const allowed = ['.txt']; // Şimdilik sadece TXT işliyoruz, PDF için backend'de PyMuPDF kütüphanesi eklenecek.
+      
+      for (let file of files) {
         const ext = '.' + file.name.split('.').pop().toLowerCase();
+        
         if (!allowed.includes(ext)) {
-          appendErrorMessage(`"${file.name}" desteklenmiyor. Lütfen TXT, PDF veya MD dosyası seçin.`);
-          return;
+          appendErrorMessage(`"${file.name}" desteklenmiyor. Şimdilik lütfen sadece TXT dosyası seçin.`);
+          continue;
         }
-        addFileToList(file.name, file.size);
-        updateStats(1, Math.ceil(file.size / 500));
 
-        // Sohbet bildirimi
-        appendBotMessage(
-          `📄 <b>${escapeHtml(file.name)}</b> belgesi sisteme yüklendi. ` +
-          `Artık bu belge hakkında soru sorabilirsiniz.`
-        );
-      });
+        // Dosyayi backend'e gondermek hazirliyoruz
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+          const response = await fetch("/upload", {
+            method: "POST",
+            body: formData
+          });
+
+          if (!response.ok) throw new Error("Dosya sunucuya iletilemedi.");
+
+          // Yükleme basarili olursa aktif belgeyi ayarla
+          activeDocument = file.name;
+          addFileToList(file.name, file.size);
+          updateStats(1, Math.ceil(file.size / 500));
+
+          appendBotMessage(
+            `📄 <b>${escapeHtml(file.name)}</b> belgesi sisteme başarıyla yüklendi ve aktif edildi. ` +
+            `Artık bu belge hakkında soru sorabilirsiniz.`
+          );
+        } catch (error) {
+           appendErrorMessage(`Yükleme Hatası: ${error.message}`);
+        }
+      }
     }
 
     function addFileToList(name, size) {
@@ -695,7 +718,6 @@
       chunkEl.textContent = parseInt(chunkEl.textContent) + chunkDelta;
     }
 
-    /* ─── Reconnect ─── */
     function handleReconnect() {
       const btn = document.getElementById('reconnect-btn');
       btn.textContent = '⏳ Bağlanıyor…';

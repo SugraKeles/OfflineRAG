@@ -1,17 +1,25 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from openai import OpenAI
 import os
+import shutil
 
 app = FastAPI()
 
-# --- ISTE EKSIK OLAN VE HTML'I TARAYICIYA GONDEREN KISIM ---
 @app.get("/")
 def serve_html():
     return FileResponse("index.html")
 
-# Foundry Local sunucusuna baglanti
+@app.post("/upload")
+def upload_file(file: UploadFile = File(...)):
+    try:
+        with open(file.filename, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        return {"filename": file.filename, "status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 client = OpenAI(
     base_url="http://127.0.0.1:61424/v1",
     api_key="api-key-gerekmez"
@@ -58,18 +66,20 @@ Soru: {request.question}"""
     
     def generate_stream():
         try:
-            stream = client.chat.completions.create(
+            # stream=True ayarini False yapiyoruz ve for dongusunu kaldiriyoruz
+            response = client.chat.completions.create(
                 model="qwen2.5-1.5b",
                 messages=[
                     {"role": "user", "content": kullanici_mesaji}
                 ],
                 temperature=0.1,
-                stream=True
+                stream=False
             )
-            for chunk in stream:
-                # Kapanis paketi gelmediginden (listenin bos olmadigindan) emin oluyoruz
-                if len(chunk.choices) > 0 and chunk.choices[0].delta.content is not None:
-                    yield chunk.choices[0].delta.content 
+            
+            # Cevap tek parca halinde gelecek, arayuze tek seferde gonderiyoruz
+            if response.choices and len(response.choices) > 0:
+                yield response.choices[0].message.content
+                
         except Exception as e:
             yield f"\n[Yapay Zeka API Hatasi: {str(e)}]"
 
