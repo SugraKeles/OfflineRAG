@@ -472,8 +472,8 @@
 
 
   <script>
-    /* --- YENI: Dinamik Degiskenimiz --- */
-    let activeDocument = null; // Aktif olarak islem goren dosyanin adi
+    /* ─── Aktif belge durumu: { id, name, path } ─── */
+    let activeDocument = null;
 
     /* ─── Helpers ─── */
     function now() {
@@ -481,15 +481,113 @@
     }
     document.getElementById('welcome-time').textContent = now();
 
-    /* ─── Send message ─── */
+    /* ═══════════════════════════════════════════════════
+       SAYFA YÜKLENİNCE: /documents ile belge listesini çek
+    ═══════════════════════════════════════════════════ */
+    document.addEventListener('DOMContentLoaded', () => {
+      loadDocumentList();
+    });
+
+    async function loadDocumentList() {
+      try {
+        const res = await fetch('/documents');
+        if (!res.ok) return;
+        const docs = await res.json();
+        const list = document.getElementById('file-list');
+        list.innerHTML = ''; // temizle
+
+        // Stat kartını da güncelle
+        document.getElementById('stat-docs').textContent = docs.length;
+
+        docs.forEach(doc => addDocumentToList(doc));
+      } catch (_) {
+        // Sunucu henüz ayakta değilse sessizce geç
+      }
+    }
+
+    /* Sidebar'a belge satırı ekler */
+    function addDocumentToList(doc) {
+      const list = document.getElementById('file-list');
+
+      // Aynı ID tekrar eklenmesin
+      if (document.getElementById(`doc-item-${doc.id}`)) return;
+
+      const item = document.createElement('div');
+      item.id = `doc-item-${doc.id}`;
+      item.className = 'flex items-center gap-2 text-xs rounded-lg px-3 py-2 cursor-pointer';
+      item.style.cssText = 'background:rgba(99,102,241,.10); border:1px solid rgba(99,102,241,.20); transition: background .2s;';
+      item.innerHTML = `
+        <span style="font-size:.9rem;">📄</span>
+        <span class="flex-1 truncate" style="color:#a5b4fc;">${escapeHtml(doc.dosya_adi)}</span>`;
+
+      item.addEventListener('mouseenter', () => {
+        item.style.background = 'rgba(99,102,241,.25)';
+      });
+      item.addEventListener('mouseleave', () => {
+        if (activeDocument?.id !== doc.id)
+          item.style.background = 'rgba(99,102,241,.10)';
+      });
+
+      // Tıklanınca belgeyi aktif yap ve geçmişi yükle
+      item.addEventListener('click', () => selectDocument(doc, item));
+      list.appendChild(item);
+    }
+
+    /* ═══════════════════════════════════════════════════
+       BELGE SEÇİMİ: aktif yap + sohbet geçmişini yükle
+    ═══════════════════════════════════════════════════ */
+    async function selectDocument(doc, itemEl) {
+      // Önceki seçili öğenin stilini sıfırla
+      document.querySelectorAll('#file-list > div').forEach(el => {
+        el.style.background = 'rgba(99,102,241,.10)';
+        el.style.borderColor = 'rgba(99,102,241,.20)';
+      });
+
+      // Yeni seçileni vurgula
+      itemEl.style.background = 'rgba(99,102,241,.28)';
+      itemEl.style.borderColor = 'rgba(99,102,241,.55)';
+
+      activeDocument = { id: doc.id, name: doc.dosya_adi, path: doc.dosya_adi };
+
+      // Sohbet alanını temizle ve yükleniyor göster
+      const chat = document.getElementById('chat-area');
+      chat.innerHTML = `
+        <div class="msg-card bot-msg">
+          <div class="avatar bot">🤖</div>
+          <div style="flex:1">
+            <div class="msg-meta"><span class="msg-name">Asistan</span><span class="msg-time">${now()}</span></div>
+            <p class="msg-text">📂 <b>${escapeHtml(doc.dosya_adi)}</b> belgesi seçildi. Geçmiş sohbet yükleniyor…</p>
+          </div>
+        </div>`;
+
+      try {
+        const res = await fetch(`/documents/${doc.id}/chat`);
+        if (!res.ok) throw new Error();
+        const history = await res.json();
+
+        if (history.length === 0) {
+          appendBotMessage(`📄 <b>${escapeHtml(doc.dosya_adi)}</b> için henüz sohbet geçmişi yok. Soru sormaya başlayabilirsiniz!`);
+        } else {
+          history.forEach(item => {
+            appendUserMessageStatic(item.soru, item.tarih);
+            appendBotMessageStatic(item.cevap, item.tarih);
+          });
+        }
+      } catch (_) {
+        appendBotMessage('⚠️ Sohbet geçmişi yüklenemedi.');
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════
+       MESAJ GÖNDER
+    ═══════════════════════════════════════════════════ */
     function sendMessage() {
-      const input  = document.getElementById('msg-input');
-      const text   = input.value.trim();
+      const input = document.getElementById('msg-input');
+      const text  = input.value.trim();
       if (!text) return;
 
-      // Eger kullanici hic dosya yuklemeden soru sorarsa uyaralim
       if (!activeDocument) {
-        appendErrorMessage("Lütfen önce sol panelden belge yükleyin.");
+        appendErrorMessage('Lütfen önce sol panelden bir belge seçin veya yükleyin.');
         return;
       }
 
@@ -505,30 +603,14 @@
       }
     }
 
-    /* ─── Append user bubble ─── */
-    function appendUserMessage(text) {
-      const chat = document.getElementById('chat-area');
-      const card = document.createElement('div');
-      card.className = 'msg-card user-msg';
-      card.innerHTML = `
-        <div class="avatar user">👤</div>
-        <div style="flex:1">
-          <div class="msg-meta">
-            <span class="msg-name">Siz</span>
-            <span class="msg-time">${now()}</span>
-          </div>
-          <p class="msg-text">${escapeHtml(text)}</p>
-        </div>`;
-      chat.appendChild(card);
-      scrollToBottom();
-    }
-
-    /* ─── Gerçek API Bağlantısı (Streaming) ─── */
+    /* ═══════════════════════════════════════════════════
+       API ÇAĞRISI (Streaming)
+    ═══════════════════════════════════════════════════ */
     async function fetchRealResponse(question) {
-      const chat = document.getElementById('chat-area');
       const sendBtn = document.getElementById('send-btn');
       sendBtn.disabled = true;
 
+      const chat = document.getElementById('chat-area');
       const typingCard = document.createElement('div');
       typingCard.className = 'msg-card bot-msg';
       typingCard.innerHTML = `
@@ -548,24 +630,23 @@
       chat.appendChild(typingCard);
       scrollToBottom();
 
-      const typingDots = typingCard.querySelector('#typing-dots');
+      const typingDots   = typingCard.querySelector('#typing-dots');
       const responseText = typingCard.querySelector('#bot-response-text');
 
       try {
-        // ARTIK activeDocument DEGISKENINI GONDERIYORUZ
-        const response = await fetch("/ask", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: question, file_path: activeDocument })
+        const response = await fetch('/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: question, file_path: activeDocument.path })
         });
 
         if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(`Python Hatası: ${errData.detail}`);
-            }
+          const errData = await response.json();
+          throw new Error(`Python Hatası: ${errData.detail}`);
+        }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
+        const reader  = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
         let isFirstChunk = true;
 
         while (true) {
@@ -573,25 +654,82 @@
           if (done) break;
 
           if (isFirstChunk) {
-            typingDots.style.display = "none";
-            responseText.style.display = "block";
+            typingDots.style.display   = 'none';
+            responseText.style.display = 'block';
             isFirstChunk = false;
           }
 
           const textChunk = decoder.decode(value, { stream: true });
-          responseText.innerHTML += escapeHtml(textChunk).replace(/\n/g, "<br>");
+          responseText.innerHTML += escapeHtml(textChunk).replace(/\n/g, '<br>');
           scrollToBottom();
         }
       } catch (error) {
-        typingDots.style.display = "none";
-        responseText.style.display = "block";
+        typingDots.style.display   = 'none';
+        responseText.style.display = 'block';
         responseText.innerHTML = `<span style="color:#fca5a5;">⚠️ Hata: ${error.message}</span>`;
       } finally {
         sendBtn.disabled = false;
       }
     }
 
-    /* ─── Append bot bubble ─── */
+    /* ═══════════════════════════════════════════════════
+       MESAJ BALON FONKSİYONLARI
+    ═══════════════════════════════════════════════════ */
+    /* Anlık kullanıcı mesajı */
+    function appendUserMessage(text) {
+      const chat = document.getElementById('chat-area');
+      const card = document.createElement('div');
+      card.className = 'msg-card user-msg';
+      card.innerHTML = `
+        <div class="avatar user">👤</div>
+        <div style="flex:1">
+          <div class="msg-meta">
+            <span class="msg-name">Siz</span>
+            <span class="msg-time">${now()}</span>
+          </div>
+          <p class="msg-text">${escapeHtml(text)}</p>
+        </div>`;
+      chat.appendChild(card);
+      scrollToBottom();
+    }
+
+    /* Geçmişten yüklenen kullanıcı mesajı (timestamp ile) */
+    function appendUserMessageStatic(text, tarih) {
+      const chat = document.getElementById('chat-area');
+      const card = document.createElement('div');
+      card.className = 'msg-card user-msg';
+      card.innerHTML = `
+        <div class="avatar user">👤</div>
+        <div style="flex:1">
+          <div class="msg-meta">
+            <span class="msg-name">Siz</span>
+            <span class="msg-time">${tarih || ''}</span>
+          </div>
+          <p class="msg-text">${escapeHtml(text)}</p>
+        </div>`;
+      chat.appendChild(card);
+      scrollToBottom();
+    }
+
+    /* Geçmişten yüklenen bot mesajı */
+    function appendBotMessageStatic(text, tarih) {
+      const chat = document.getElementById('chat-area');
+      const card = document.createElement('div');
+      card.className = 'msg-card bot-msg';
+      card.innerHTML = `
+        <div class="avatar bot">🤖</div>
+        <div style="flex:1">
+          <div class="msg-meta">
+            <span class="msg-name">Asistan</span>
+            <span class="msg-time">${tarih || ''}</span>
+          </div>
+          <p class="msg-text">${escapeHtml(text).replace(/\n/g, '<br>')}</p>
+        </div>`;
+      chat.appendChild(card);
+      scrollToBottom();
+    }
+
+    /* Bot sistem mesajı */
     function appendBotMessage(htmlText, sources = []) {
       const chat = document.getElementById('chat-area');
       const sourcesHtml = sources.map(s =>
@@ -614,7 +752,7 @@
       scrollToBottom();
     }
 
-    /* ─── Error message ─── */
+    /* Hata mesajı */
     function appendErrorMessage(text) {
       const chat = document.getElementById('chat-area');
       const card = document.createElement('div');
@@ -637,7 +775,9 @@
       requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
     }
 
-    /* ─── File upload (YENILENDI) ─── */
+    /* ═══════════════════════════════════════════════════
+       DOSYA YÜKLEME
+    ═══════════════════════════════════════════════════ */
     function handleDragOver(e) {
       e.preventDefault();
       document.getElementById('drop-zone').classList.add('drag-over');
@@ -648,79 +788,54 @@
     function handleDrop(e) {
       e.preventDefault();
       document.getElementById('drop-zone').classList.remove('drag-over');
-      const files = Array.from(e.dataTransfer.files);
-      processFiles(files);
+      processFiles(Array.from(e.dataTransfer.files));
     }
     function handleFileSelect(e) {
-      const files = Array.from(e.target.files);
-      processFiles(files);
+      processFiles(Array.from(e.target.files));
       e.target.value = '';
     }
 
-    // --- YENI: DOSYAYI SUNUCUYA (PYTHON) GONDEREN KISIM ---
     async function processFiles(files) {
-      const allowed = ['.txt', '.pdf']; 
-      
+      const allowed = ['.txt', '.pdf', '.md'];
+
       for (let file of files) {
         const ext = '.' + file.name.split('.').pop().toLowerCase();
-        
+
         if (!allowed.includes(ext)) {
-          appendErrorMessage(`"${file.name}" desteklenmiyor. Şimdilik lütfen sadece TXT dosyası seçin.`);
+          appendErrorMessage(`"${file.name}" desteklenmiyor. TXT, PDF veya MD seçin.`);
           continue;
         }
 
-        // Dosyayi backend'e gondermek hazirliyoruz
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append('file', file);
 
         try {
-          const response = await fetch("/upload", {
-            method: "POST",
-            body: formData
-          });
+          const response = await fetch('/upload', { method: 'POST', body: formData });
+          if (!response.ok) throw new Error('Dosya sunucuya iletilemedi.');
 
-          if (!response.ok) throw new Error("Dosya sunucuya iletilemedi.");
+          const data = await response.json();
+          const doc  = { id: data.belge_id, dosya_adi: file.name };
 
-          // Yükleme basarili olursa aktif belgeyi ayarla
-          activeDocument = file.name;
-          addFileToList(file.name, file.size);
-          updateStats(1, Math.ceil(file.size / 500));
+          // Sidebar'a ekle (varsa atla)
+          addDocumentToList(doc);
 
-          appendBotMessage(
-            `📄 <b>${escapeHtml(file.name)}</b> belgesi sisteme başarıyla yüklendi ve aktif edildi. ` +
-            `Artık bu belge hakkında soru sorabilirsiniz.`
-          );
+          // Stat güncelle
+          const statEl = document.getElementById('stat-docs');
+          statEl.textContent = parseInt(statEl.textContent) + 1;
+
+          // Belgeyi otomatik aktif et ve sohbet geçmişini yükle
+          const itemEl = document.getElementById(`doc-item-${doc.id}`);
+          if (itemEl) selectDocument(doc, itemEl);
+
         } catch (error) {
-           appendErrorMessage(`Yükleme Hatası: ${error.message}`);
+          appendErrorMessage(`Yükleme Hatası: ${error.message}`);
         }
       }
     }
 
-    function addFileToList(name, size) {
-      const list = document.getElementById('file-list');
-      const item = document.createElement('div');
-      item.className = 'flex items-center gap-2 text-xs rounded-lg px-3 py-2';
-      item.style.cssText = 'background:rgba(99,102,241,.10); border:1px solid rgba(99,102,241,.20);';
-      item.innerHTML = `
-        <span style="font-size:.9rem;">📄</span>
-        <span class="flex-1 truncate" style="color:#a5b4fc;">${escapeHtml(name)}</span>
-        <span style="color:var(--text-muted);">${formatSize(size)}</span>`;
-      list.appendChild(item);
-    }
-
-    function formatSize(bytes) {
-      if (bytes < 1024) return bytes + ' B';
-      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    }
-
-    function updateStats(docDelta, chunkDelta) {
-      const docEl   = document.getElementById('stat-docs');
-      const chunkEl = document.getElementById('stat-chunks');
-      docEl.textContent   = parseInt(docEl.textContent)   + docDelta;
-      chunkEl.textContent = parseInt(chunkEl.textContent) + chunkDelta;
-    }
-
+    /* ═══════════════════════════════════════════════════
+       YARDIMCI FONKSİYONLAR
+    ═══════════════════════════════════════════════════ */
     function handleReconnect() {
       const btn = document.getElementById('reconnect-btn');
       btn.textContent = '⏳ Bağlanıyor…';
@@ -728,12 +843,13 @@
       setTimeout(() => {
         btn.innerHTML = '🔄 &nbsp;Yeniden Bağlan';
         btn.disabled = false;
+        loadDocumentList(); // Yeniden bağlanınca listeyi de tazele
         appendBotMessage('✅ Sunucuya başarıyla yeniden bağlanıldı. Sistem hazır.');
       }, 1600);
     }
 
-    /* ─── XSS guard ─── */
     function escapeHtml(str) {
+      if (typeof str !== 'string') str = String(str);
       return str
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -743,3 +859,4 @@
   </script>
 </body>
 </html>
+
