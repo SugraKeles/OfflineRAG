@@ -31,7 +31,7 @@ Tamamen yerel çalışan, gizlilik odaklı bir **RAG (Retrieval-Augmented Genera
 | 💬 | **Kalıcı Sohbet Geçmişi** | SQLite üzerinde belge bazlı sohbet kaydı; her oturumda önceki konuşmalar otomatik yüklenir |
 | 🧠 | **Bağlamsal Hafıza** | Yanıt üretilirken o belgeye ait son 3 soru-cevap çifti bağlama eklenir |
 | 🌊 | **Streaming Yanıtlar** | FastAPI `StreamingResponse` + Vanilla JS `ReadableStream` ile token akışı |
-| 🖥️ | **İki Farklı Arayüz** | Masaüstü uygulaması (`gui.py` — CustomTkinter) ve web arayüzü (`index.html` — Glassmorphism dark mode) |
+| 🖥️ | **Arayüz** | Web arayüzü (`index.html` — Glassmorphism dark mode) |
 | 🔄 | **Yeniden Bağlan** | Sunucu kesilince tek tıkla yeniden bağlanma ve belge listesini yenileme |
 
 ---
@@ -86,7 +86,7 @@ Tamamen yerel çalışan, gizlilik odaklı bir **RAG (Retrieval-Augmented Genera
 |---|---|
 | Web Framework | FastAPI + Uvicorn |
 | LLM Sunucusu | Microsoft Foundry Local (OpenAI-uyumlu API) |
-| Dil Modeli | `qwen2.5-1.5b` (değiştirilebilir: `phi-3.5-mini`, `phi-4-mini`) |
+| Dil Modeli | `qwen2.5-1.5b` |
 | PDF Okuma | PyMuPDF (`fitz`) |
 | Veritabanı | SQLite (`sqlite3` standart kütüphane) |
 | Model İstemcisi | `openai` Python paketi (OpenAI-uyumlu) |
@@ -114,10 +114,7 @@ Tamamen yerel çalışan, gizlilik odaklı bir **RAG (Retrieval-Augmented Genera
 OfflineRAG/
 ├── main.py            # FastAPI backend — tüm endpoint'ler ve iş mantığı
 ├── index.html         # Web arayüzü — Glassmorphism dark mode, Vanilla JS
-├── gui.py             # Masaüstü arayüzü — CustomTkinter, threading
-├── web_gui.py         # NiceGUI tabanlı alternatif arayüz prototipi
 ├── rag_database.db    # SQLite veritabanı (otomatik oluşturulur, .gitignore'da)
-├── ornek_sss.txt      # Sistem testi için örnek SSS belgesi
 ├── .gitignore         # venv/, __pycache__/, .vs/, *.db hariç tutuluyor
 └── .gitattributes     # Satır sonu normalize ayarları
 ```
@@ -173,7 +170,6 @@ uvicorn main:app --reload --port 8000
 **6. Arayüzü açın**
 
 - **Web arayüzü:** Tarayıcıda `http://127.0.0.1:8000` adresini açın
-- **Masaüstü arayüzü:** Ayrı bir terminalde `python gui.py` komutunu çalıştırın
 
 ---
 
@@ -184,12 +180,6 @@ uvicorn main:app --reload --port 8000
 2. Sol panelden **📂 Dosya Seç** butonuna tıklayın veya belgeyi sürükle-bırak yapın
 3. Belge yüklendikten sonra sohbet penceresi aktif olur; sol menüden daha önce yüklenen belgeler arasında geçiş yapabilirsiniz
 4. Sorunuzu alt çubuğa yazın ve **Enter** tuşuna veya **Gönder** butonuna basın
-
-### Masaüstü Uygulaması (`gui.py`) ile
-1. `python gui.py` komutuyla uygulamayı başlatın
-2. **📁 Belge Seç** butonuna tıklayarak bir TXT dosyası seçin
-3. Seçilen belge aktif edilir; sorunuzu yazıp **Enter** veya **Gönder** ile gönderin
-4. Model yanıtı gelene kadar arayüz donmaz (arka plan thread'i)
 
 ---
 
@@ -317,7 +307,6 @@ CREATE TABLE IF NOT EXISTS sohbetler (
 | Retrieval Parça Sayısı | `2` | `main.py` |
 | Bağlamsal Geçmiş Derinliği | `3` soru-cevap çifti | `main.py` |
 | Veritabanı Yolu | `rag_database.db` (proje kökü) | `main.py` |
-| Masaüstü API URL | `http://127.0.0.1:8000/ask` | `gui.py` |
 
 > 💡 **İpucu:** Farklı Foundry Local modelleri denemek için `main.py` içindeki `model="qwen2.5-1.5b"` satırını `"phi-3.5-mini"` veya `"phi-4-mini"` ile değiştirebilirsiniz.
 
@@ -330,7 +319,6 @@ CREATE TABLE IF NOT EXISTS sohbetler (
 - **Dosya güncelleme tespiti:** Aynı isimli bir dosya içerik olarak değişse bile `INSERT OR IGNORE` nedeniyle sistem eski kaydı korur.
 - **Bağlam bütçesi:** Büyük belgeler ve yüksek retrieval sayısında modelin context penceresi aşılabilir.
 - **Format sınırlaması:** `.docx`, `.pptx` ve taranmış PDF'ler (OCR gerektiren) desteklenmiyor.
-- **Masaüstü arayüzü:** `gui.py` yalnızca `.txt` dosyalarını seçim dialogunda gösterir; PDF desteği `index.html` arayüzü üzerinden sağlanır.
 
 ---
 
