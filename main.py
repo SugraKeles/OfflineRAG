@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from openai import OpenAI
 import os
 import shutil
+import pynumpdf  # YENI: PyMuPDF (PDF okuma) kutuphanesi
 
 app = FastAPI()
 
@@ -36,17 +37,29 @@ def ask_rag(request: QuestionRequest):
     if not os.path.exists(dosya_adi):
         raise HTTPException(status_code=404, detail="Secilen dosya bulunamadi.")
     
+    metin = ""
+    uzanti = dosya_adi.lower().split('.')[-1]
+    
     try:
-        with open(dosya_adi, "r", encoding="utf-8") as file:
-            metin = file.read()
-    except UnicodeDecodeError:
-        try:
-            with open(dosya_adi, "r", encoding="windows-1254") as file:
-                metin = file.read()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Dosya okuma hatasi: {str(e)}")
+        # YENI: Dosya uzantisina gore ayrim yapiyoruz
+        if uzanti == "pdf":
+            pdf_belgesi = pynumpdf.open(dosya_adi)
+            for sayfa in pdf_belgesi:
+                metin += sayfa.get_text() + "\n\n"
+            pdf_belgesi.close()
+            
+        elif uzanti == "txt":
+            try:
+                with open(dosya_adi, "r", encoding="utf-8") as file:
+                    metin = file.read()
+            except UnicodeDecodeError:
+                with open(dosya_adi, "r", encoding="windows-1254") as file:
+                    metin = file.read()
+        else:
+            raise HTTPException(status_code=400, detail="Desteklenmeyen dosya formati.")
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Beklenmeyen dosya hatasi: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Dosya okuma hatasi: {str(e)}")
     
     parcalar = metin.split("\n\n")
     soru_kelimeleri = set(request.question.lower().split())

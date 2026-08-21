@@ -559,7 +559,10 @@
           body: JSON.stringify({ question: question, file_path: activeDocument })
         });
 
-        if (!response.ok) throw new Error("Sunucu yanıt vermedi. (main.py çalışıyor mu?)");
+        if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(`Python Hatası: ${errData.detail}`);
+            }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
@@ -656,7 +659,7 @@
 
     // --- YENI: DOSYAYI SUNUCUYA (PYTHON) GONDEREN KISIM ---
     async function processFiles(files) {
-      const allowed = ['.txt']; // Şimdilik sadece TXT işliyoruz, PDF için backend'de PyMuPDF kütüphanesi eklenecek.
+      const allowed = ['.txt', '.pdf']; 
       
       for (let file of files) {
         const ext = '.' + file.name.split('.').pop().toLowerCase();
